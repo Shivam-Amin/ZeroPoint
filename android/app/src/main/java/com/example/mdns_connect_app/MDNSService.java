@@ -20,7 +20,7 @@ import javax.jmdns.ServiceListener;
 
 public class MDNSService {
     private static final String TAG = "MDNSService";
-    private static final String SERVICE_TYPE = "_mdnsconnect._tcp.local.";
+    private static final String SERVICE_TYPE = "_mdnsconnect._udp.local.";
     private static final int SERVICE_PORT = 55555;
 
     private JmDNS jmDNS;
