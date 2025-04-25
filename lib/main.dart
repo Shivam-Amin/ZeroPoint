@@ -1,8 +1,11 @@
-// File: lib/main.dart
+// File: lib/main.dart (modified for desktop platforms)
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mdns_connect_app/pages/home.dart';
 import 'dart:async';
+import 'dart:io';
+import 'services/desktop_mdns_discovery.dart'; // Import the desktop discovery service
 
 void main() {
   runApp(const MyApp());
@@ -36,14 +39,48 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
   String _statusMessage = 'Starting service...';
   Timer? _discoveryTimer;
   final int _discoveryDuration = 10; // seconds to run discovery
+  
+  // Desktop mDNS discovery service
+  DesktopMDNSDiscovery? _desktopDiscovery;
 
   @override
   void initState() {
     super.initState();
-    _setupMethodCallHandler();
-    // Start broadcasting and initial discovery automatically
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _startBroadcastAndDiscovery();
+    
+    if (Platform.isAndroid || Platform.isIOS) {
+      _setupMethodCallHandler();
+      // Start broadcasting and initial discovery automatically for mobile
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startBroadcastAndDiscovery();
+      });
+    } else {
+      // For desktop platforms, only set up discovery
+      _setupDesktopDiscovery();
+    }
+  }
+
+  void _setupDesktopDiscovery() {
+    _desktopDiscovery = DesktopMDNSDiscovery();
+    
+    // Initialize the desktop discovery service
+    _desktopDiscovery!.initialize().then((_) {
+      setState(() {
+        _statusMessage = 'Ready to discover devices';
+      });
+      
+      // Listen for device updates
+      _desktopDiscovery!.devicesStream.listen((devices) {
+        setState(() {
+          _discoveredDevices.clear();
+          for (var device in devices) {
+            _discoveredDevices.add(device.toJson());
+          }
+        });
+      });
+    }).catchError((error) {
+      setState(() {
+        _statusMessage = 'Failed to initialize mDNS: $error';
+      });
     });
   }
 
@@ -69,11 +106,13 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
     });
 
     try {
-      // First start the broadcasting service
-      await platform.invokeMethod('startBroadcast');
-
-      // Then start discovery
-      _startDiscovery();
+      if (Platform.isAndroid || Platform.isIOS) {
+        // Mobile platforms: use the platform channel
+        // First start the broadcasting service
+        await platform.invokeMethod('startBroadcast');
+        // Then start discovery
+        _startDiscovery();
+      }
     } on PlatformException catch (e) {
       setState(() {
         _statusMessage = 'Failed to start service: ${e.message}';
@@ -91,15 +130,21 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
     });
 
     try {
-      await platform.invokeMethod('startDiscovery');
+      if (Platform.isAndroid || Platform.isIOS) {
+        // Mobile platforms: use the platform channel
+        await platform.invokeMethod('startDiscovery');
+      } else {
+        // Desktop platforms: use the Flutter mDNS discovery
+        await _desktopDiscovery?.startDiscovery(duration: _discoveryDuration);
+      }
 
       // Set timer to stop discovery after specified duration
       _discoveryTimer = Timer(Duration(seconds: _discoveryDuration), () {
         _stopDiscovery();
       });
-    } on PlatformException catch (e) {
+    } catch (e) {
       setState(() {
-        _statusMessage = 'Failed to start discovery: ${e.message}';
+        _statusMessage = 'Failed to start discovery: $e';
         _isDiscovering = false;
       });
     }
@@ -109,15 +154,21 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
     _discoveryTimer?.cancel();
 
     try {
-      await platform.invokeMethod('stopDiscovery');
+      if (Platform.isAndroid || Platform.isIOS) {
+        // Mobile platforms: use the platform channel
+        await platform.invokeMethod('stopDiscovery');
+      } else {
+        // Desktop platforms: use the Flutter mDNS discovery
+        _desktopDiscovery?.stopDiscovery();
+      }
+      
       setState(() {
-        _statusMessage =
-            'Discovery completed (${_discoveredDevices.length} devices found)';
+        _statusMessage = 'Discovery completed (${_discoveredDevices.length} devices found)';
         _isDiscovering = false;
       });
-    } on PlatformException catch (e) {
+    } catch (e) {
       setState(() {
-        _statusMessage = 'Failed to stop discovery: ${e.message}';
+        _statusMessage = 'Failed to stop discovery: $e';
         _isDiscovering = false;
       });
     }
@@ -126,7 +177,9 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('mDNS Device Discovery')),
+      appBar: AppBar(
+        backgroundColor: const Color.fromARGB(48, 26, 26, 26),
+        title: const Text('ZeroPoint')),
       body: Column(
         children: [
           Padding(
@@ -177,13 +230,21 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
                           trailing: const Icon(Icons.devices),
                           onTap: () {
                             // We'll implement connection functionality in the next step
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            if (Platform.isAndroid || Platform.isIOS) {
+                              final String deviceName = device['name']?.toString() ?? 'Unknown Device';
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => Home(deviceName: deviceName)),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
                                   'Connecting to ${device['name']} will be implemented next',
                                 ),
                               ),
                             );
+                            }
                           },
                         );
                       },
@@ -197,7 +258,11 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
   @override
   void dispose() {
     _discoveryTimer?.cancel();
-    _stopDiscovery();
+    if (Platform.isAndroid || Platform.isIOS) {
+      _stopDiscovery();
+    } else {
+      _desktopDiscovery?.dispose();
+    }
     super.dispose();
   }
 }
