@@ -21,7 +21,9 @@ public class MainActivity extends FlutterActivity implements MDNSService.DeviceD
         super.configureFlutterEngine(flutterEngine);
 
         channel = new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL);
-        mdnsService = new MDNSService(this);
+        
+        // Pass both the application context and this (as the DeviceDiscoveryListener)
+        mdnsService = new MDNSService(getApplicationContext(), this);
 
         channel.setMethodCallHandler((call, result) -> {
             switch (call.method) {
